@@ -1,8 +1,9 @@
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
-from jose import jwt
+from jose import jwt, JWTError
 from passlib.context import CryptContext
+from fastapi.security import OAuth2PasswordBearer
 
 from app.core.config import settings
 
@@ -24,8 +25,10 @@ def verify_password(password: str, hashed: str) -> bool:
 
 
 # --------------------------------------------------
-# JWT handling
+# OAuth2 / JWT
 # --------------------------------------------------
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+
 ALGORITHM = "HS256"
 
 
@@ -54,9 +57,11 @@ def create_access_token(
 
 
 def decode_access_token(token: str) -> dict[str, Any]:
-    return jwt.decode(
-        token,
-        settings.SECRET_KEY,
-        algorithms=[ALGORITHM],
-        options={"verify_aud": False},
-    )
+    try:
+        return jwt.decode(
+            token,
+            settings.SECRET_KEY,
+            algorithms=[ALGORITHM],
+        )
+    except JWTError as exc:
+        raise ValueError("Invalid or expired token") from exc

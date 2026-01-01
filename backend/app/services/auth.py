@@ -1,15 +1,17 @@
+from fastapi import Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.schemas.user import UserCreate
 from app.models.user import User
-from app.crud.user import (
-    get_user_by_email,
-    create_user,
-)
+from app.crud.user import get_user_by_email, create_user
 from app.core.security import (
     hash_password,
     verify_password,
+    create_access_token,
+    decode_access_token,
+    oauth2_scheme,
 )
+from app.db.session import get_db
 
 
 # --------------------------------------------------
@@ -61,5 +63,37 @@ async def authenticate_user(
 
     if not user.is_active:
         raise InvalidCredentials("User account is inactive")
+
+    # Attach JWT
+    user.access_token = create_access_token(subject=user.email)
+
+    return user
+
+
+# --------------------------------------------------
+# Current user dependency
+# --------------------------------------------------
+async def get_current_user(
+    token: str = Depends(oauth2_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    try:
+        payload = decode_access_token(token)
+        email: str | None = payload.get("sub")
+        if not email:
+            raise ValueError()
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    user = await get_user_by_email(db, email)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found",
+        )
 
     return user
