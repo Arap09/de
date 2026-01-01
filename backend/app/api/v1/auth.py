@@ -6,17 +6,17 @@ from app.schemas.user import UserCreate, UserLogin, UserRead
 from app.services.auth import (
     register_user,
     authenticate_user,
+    get_current_user,
     UserAlreadyExists,
     InvalidCredentials,
-)
-from app.core.security import (
-    create_access_token,
-    get_current_user,
 )
 from app.models.user import User
 
 
-router = APIRouter(prefix="/auth", tags=["Auth"])
+router = APIRouter(
+    prefix="/auth",
+    tags=["Auth"],
+)
 
 
 # --------------------------------------------------
@@ -31,9 +31,6 @@ async def register(
     payload: UserCreate,
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Register a new user account.
-    """
     try:
         user = await register_user(db, payload)
     except UserAlreadyExists as exc:
@@ -53,9 +50,6 @@ async def login(
     payload: UserLogin,
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Authenticate user and return JWT access token.
-    """
     try:
         user = await authenticate_user(
             db,
@@ -68,12 +62,8 @@ async def login(
             detail=str(exc),
         )
 
-    access_token = create_access_token(
-        subject=str(user.id),
-    )
-
     return {
-        "access_token": access_token,
+        "access_token": user.access_token,
         "token_type": "bearer",
     }
 
@@ -88,7 +78,4 @@ async def login(
 async def me(
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Get the currently authenticated user.
-    """
     return current_user

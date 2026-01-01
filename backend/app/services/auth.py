@@ -1,93 +1,65 @@
-from typing import Optional
-
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.user import User
 from app.schemas.user import UserCreate
+from app.models.user import User
 from app.crud.user import (
     get_user_by_email,
-    get_user_by_phone,
     create_user,
 )
-from app.core.security import verify_password, hash_password
-from app.utils.passwords import validate_password_rules, generate_password
+from app.core.security import (
+    hash_password,
+    verify_password,
+)
 
 
-# -------------------------
-# Exceptions (domain-level)
-# -------------------------
-
-class AuthError(Exception):
+# --------------------------------------------------
+# Domain exceptions
+# --------------------------------------------------
+class UserAlreadyExists(Exception):
     pass
 
 
-class UserAlreadyExists(AuthError):
+class InvalidCredentials(Exception):
     pass
 
 
-class InvalidCredentials(AuthError):
-    pass
-
-
-# -------------------------
-# Signup
-# -------------------------
-
+# --------------------------------------------------
+# Registration
+# --------------------------------------------------
 async def register_user(
     db: AsyncSession,
     payload: UserCreate,
-    *,
-    referral_code: Optional[str] = None,
-    referred_by_id: Optional[int] = None,
 ) -> User:
-    # Enforce unique email
-    existing_email = await get_user_by_email(db, payload.email)
-    if existing_email:
-        raise UserAlreadyExists("Email already registered")
-
-    # Enforce unique phone
-    existing_phone = await get_user_by_phone(db, payload.phone_number)
-    if existing_phone:
-        raise UserAlreadyExists("Phone number already registered")
-
-    # Password handling
-    if payload.password:
-        validate_password_rules(payload.password)
-        password = payload.password
-    else:
-        password = generate_password()
-
-    hashed_password = hash_password(password)
+    existing = await get_user_by_email(db, payload.email)
+    if existing:
+        raise UserAlreadyExists("User with this email already exists")
 
     user = await create_user(
         db,
-        payload,
-        hashed_password=hashed_password,
-        referral_code=referral_code,
-        referred_by_id=referred_by_id,
+        email=payload.email,
+        hashed_password=hash_password(payload.password),
     )
 
     return user
 
 
-# -------------------------
-# Login
-# -------------------------
-
+# --------------------------------------------------
+# Authentication
+# --------------------------------------------------
 async def authenticate_user(
     db: AsyncSession,
     *,
     email: str,
-    password: str
+    password: str,
 ) -> User:
     user = await get_user_by_email(db, email)
     if not user:
         raise InvalidCredentials("Invalid email or password")
 
-    if not user.is_active:
-        raise InvalidCredentials("Account is disabled")
-
     if not verify_password(password, user.hashed_password):
         raise InvalidCredentials("Invalid email or password")
+
+    if not user.is_active:
+        raise InvalidCredentials("User account is inactive")
 
     return user
