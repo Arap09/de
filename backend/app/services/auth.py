@@ -15,17 +15,6 @@ from app.db.session import get_db
 
 
 # --------------------------------------------------
-# Domain exceptions
-# --------------------------------------------------
-class UserAlreadyExists(Exception):
-    pass
-
-
-class InvalidCredentials(Exception):
-    pass
-
-
-# --------------------------------------------------
 # Registration
 # --------------------------------------------------
 async def register_user(
@@ -34,7 +23,10 @@ async def register_user(
 ) -> User:
     existing = await get_user_by_email(db, payload.email)
     if existing:
-        raise UserAlreadyExists("User with this email already exists")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="User with this email already exists",
+        )
 
     user = await create_user(
         db=db,
@@ -56,14 +48,24 @@ async def authenticate_user(
 ) -> User:
     user = await get_user_by_email(db, email)
     if not user:
-        raise InvalidCredentials("Invalid email or password")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password",
+        )
 
     if not verify_password(password, user.hashed_password):
-        raise InvalidCredentials("Invalid email or password")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password",
+        )
 
     if not user.is_active:
-        raise InvalidCredentials("User account is inactive")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is inactive",
+        )
 
+    # Attach JWT dynamically (not persisted)
     user.access_token = create_access_token(subject=user.email)
     return user
 
@@ -79,7 +81,7 @@ async def get_current_user(
         payload = decode_access_token(token)
         email: str | None = payload.get("sub")
         if not email:
-            raise ValueError()
+            raise ValueError("Missing subject")
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

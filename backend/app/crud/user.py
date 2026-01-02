@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.user import User, TierEnum
 from app.schemas.user import UserCreate
 from app.core.config import settings
+from app.core.security import hash_password
 
 
 # -----------------------------------
@@ -15,7 +16,7 @@ from app.core.config import settings
 
 async def get_user_by_id(
     db: AsyncSession,
-    user_id: int
+    user_id: int,
 ) -> Optional[User]:
     result = await db.execute(
         select(User).where(User.id == user_id)
@@ -25,7 +26,7 @@ async def get_user_by_id(
 
 async def get_user_by_email(
     db: AsyncSession,
-    email: str
+    email: str,
 ) -> Optional[User]:
     result = await db.execute(
         select(User).where(User.email == email)
@@ -35,7 +36,7 @@ async def get_user_by_email(
 
 async def get_user_by_phone(
     db: AsyncSession,
-    phone_number: str
+    phone_number: str,
 ) -> Optional[User]:
     result = await db.execute(
         select(User).where(User.phone_number == phone_number)
@@ -87,7 +88,7 @@ async def create_user(
 
 async def set_email_verified(
     db: AsyncSession,
-    user: User
+    user: User,
 ) -> User:
     user.is_email_verified = True
     await db.commit()
@@ -98,9 +99,9 @@ async def set_email_verified(
 async def set_password(
     db: AsyncSession,
     user: User,
-    new_password: str
+    new_password: str,
 ) -> User:
-    user.hashed_password = new_password
+    user.hashed_password = hash_password(new_password)
     await db.commit()
     await db.refresh(user)
     return user
@@ -109,7 +110,7 @@ async def set_password(
 async def upgrade_tier(
     db: AsyncSession,
     user: User,
-    new_tier: TierEnum
+    new_tier: TierEnum,
 ) -> User:
     user.tier = new_tier
     await db.commit()
