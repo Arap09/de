@@ -6,7 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User, TierEnum
 from app.schemas.user import UserCreate
-from app.core.security import hash_password
 from app.core.config import settings
 
 
@@ -101,7 +100,7 @@ async def set_password(
     user: User,
     new_password: str
 ) -> User:
-    user.hashed_password = hash_password(new_password)
+    user.hashed_password = new_password
     await db.commit()
     await db.refresh(user)
     return user

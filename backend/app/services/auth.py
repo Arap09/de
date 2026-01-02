@@ -37,8 +37,8 @@ async def register_user(
         raise UserAlreadyExists("User with this email already exists")
 
     user = await create_user(
-        db,
-        email=payload.email,
+        db=db,
+        payload=payload,
         hashed_password=hash_password(payload.password),
     )
 
@@ -64,9 +64,7 @@ async def authenticate_user(
     if not user.is_active:
         raise InvalidCredentials("User account is inactive")
 
-    # Attach JWT
     user.access_token = create_access_token(subject=user.email)
-
     return user
 
 
