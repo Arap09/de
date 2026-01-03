@@ -13,7 +13,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
-from app.db.base import Base
+from app.database import Base  # ✅ FIXED: single authoritative Base
 
 
 class TierEnum(str, enum.Enum):
@@ -65,7 +65,6 @@ class User(Base):
 
     # --------------------------------------------------
     # Authorization / Role
-    # client | salesperson | admin | super_admin
     # --------------------------------------------------
     role: Mapped[str] = mapped_column(
         String(50),
@@ -86,7 +85,7 @@ class User(Base):
     trial_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # --------------------------------------------------
-    # Referral (salesperson-owned)
+    # Referral
     # --------------------------------------------------
     referral_code: Mapped[str] = mapped_column(
         String(12),

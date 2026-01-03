@@ -20,7 +20,7 @@ ENV_PATH = BASE_DIR / ".env"
 load_dotenv(dotenv_path=ENV_PATH, override=True)
 
 # -------------------------------------------------------------------
-# Read and validate DATABASE_URL
+# Read DATABASE_URL
 # -------------------------------------------------------------------
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -29,12 +29,26 @@ if not DATABASE_URL:
         "DATABASE_URL is not set. PostgreSQL (Neon) is required."
     )
 
-# Normalize Neon URL for SQLAlchemy
-if DATABASE_URL.startswith("postgresql://"):
+# -------------------------------------------------------------------
+# Normalize DATABASE_URL for Alembic (sync psycopg2 only)
+# -------------------------------------------------------------------
+if DATABASE_URL.startswith("postgresql+asyncpg://"):
+    DATABASE_URL = DATABASE_URL.replace(
+        "postgresql+asyncpg://",
+        "postgresql+psycopg2://",
+        1,
+    )
+elif DATABASE_URL.startswith("postgresql://"):
     DATABASE_URL = DATABASE_URL.replace(
         "postgresql://",
         "postgresql+psycopg2://",
         1,
+    )
+
+if "ssl=require" in DATABASE_URL:
+    DATABASE_URL = DATABASE_URL.replace(
+        "ssl=require",
+        "sslmode=require",
     )
 
 if not DATABASE_URL.startswith("postgresql+psycopg2://"):
@@ -43,9 +57,10 @@ if not DATABASE_URL.startswith("postgresql+psycopg2://"):
     )
 
 # -------------------------------------------------------------------
-# Safe to import app modules now
+# Import metadata AND MODELS
 # -------------------------------------------------------------------
 from app.database import Base  # noqa: E402
+import app.models  # noqa: E402  ✅ CRITICAL FIX
 
 # -------------------------------------------------------------------
 # Alembic configuration
@@ -74,9 +89,7 @@ def run_migrations_offline() -> None:
 
 def run_migrations_online() -> None:
     connectable = engine_from_config(
-        {
-            "sqlalchemy.url": DATABASE_URL,
-        },
+        {"sqlalchemy.url": DATABASE_URL},
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )
