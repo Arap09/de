@@ -1,4 +1,5 @@
-from pydantic_settings import BaseSettings
+# app/core/config.py
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -16,8 +17,8 @@ class Settings(BaseSettings):
     # --------------------------------------------------
     # Database & Cache
     # --------------------------------------------------
-    DATABASE_URL: str           # async DB connection (asyncpg)
-    DATABASE_URL_SYNC: str      # sync DB connection (for Alembic migrations)
+    DATABASE_URL_ASYNC: str      # asyncpg (FastAPI runtime)
+    DATABASE_URL_SYNC: str       # psycopg (Alembic, psql)
     REDIS_URL: str
 
     # --------------------------------------------------
@@ -36,11 +37,7 @@ class Settings(BaseSettings):
     # Business Rules
     # --------------------------------------------------
     TRIAL_PERIOD_DAYS: int = 7
-
-    # v1 referral rule (ACTIVE)
     DEFAULT_REFERRAL_REWARD_KES: int = 500
-
-    # legacy / future use (NOT USED in v1)
     REFERRAL_REWARD_NDOVU_KES: int = 500
 
     # --------------------------------------------------
@@ -48,9 +45,14 @@ class Settings(BaseSettings):
     # --------------------------------------------------
     CLOUDFLARE_TURNSTILE_SECRET: str
 
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
+    # --------------------------------------------------
+    # Pydantic v2 config
+    # --------------------------------------------------
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        case_sensitive=True,
+        extra="forbid",
+    )
 
 
 settings = Settings()

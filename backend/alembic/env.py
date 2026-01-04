@@ -1,3 +1,4 @@
+# app/alembic/env.py
 import sys
 import os
 from pathlib import Path
@@ -14,53 +15,31 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BASE_DIR))
 
 # -------------------------------------------------------------------
-# Explicitly load .env BEFORE any app imports
+# Explicitly load .env (Alembic runs outside app context)
 # -------------------------------------------------------------------
 ENV_PATH = BASE_DIR / ".env"
 load_dotenv(dotenv_path=ENV_PATH, override=True)
 
 # -------------------------------------------------------------------
-# Read DATABASE_URL
+# Read SYNC database URL ONLY
 # -------------------------------------------------------------------
-DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL_SYNC = os.getenv("DATABASE_URL_SYNC")
 
-if not DATABASE_URL:
+if not DATABASE_URL_SYNC:
     raise RuntimeError(
-        "DATABASE_URL is not set. PostgreSQL (Neon) is required."
+        "DATABASE_URL_SYNC is not set. Alembic requires a sync PostgreSQL URL."
     )
 
-# -------------------------------------------------------------------
-# Normalize DATABASE_URL for Alembic (sync psycopg2 only)
-# -------------------------------------------------------------------
-if DATABASE_URL.startswith("postgresql+asyncpg://"):
-    DATABASE_URL = DATABASE_URL.replace(
-        "postgresql+asyncpg://",
-        "postgresql+psycopg2://",
-        1,
-    )
-elif DATABASE_URL.startswith("postgresql://"):
-    DATABASE_URL = DATABASE_URL.replace(
-        "postgresql://",
-        "postgresql+psycopg2://",
-        1,
-    )
-
-if "ssl=require" in DATABASE_URL:
-    DATABASE_URL = DATABASE_URL.replace(
-        "ssl=require",
-        "sslmode=require",
-    )
-
-if not DATABASE_URL.startswith("postgresql+psycopg2://"):
+if "asyncpg" in DATABASE_URL_SYNC:
     raise RuntimeError(
-        "Only PostgreSQL is supported. SQLite is disabled."
+        "DATABASE_URL_SYNC must NOT use asyncpg."
     )
 
 # -------------------------------------------------------------------
 # Import metadata AND MODELS
 # -------------------------------------------------------------------
 from app.database import Base  # noqa: E402
-import app.models  # noqa: E402  ✅ CRITICAL FIX
+import app.models  # noqa: E402
 
 # -------------------------------------------------------------------
 # Alembic configuration
@@ -77,7 +56,7 @@ target_metadata = Base.metadata
 # -------------------------------------------------------------------
 def run_migrations_offline() -> None:
     context.configure(
-        url=DATABASE_URL,
+        url=DATABASE_URL_SYNC,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -89,7 +68,7 @@ def run_migrations_offline() -> None:
 
 def run_migrations_online() -> None:
     connectable = engine_from_config(
-        {"sqlalchemy.url": DATABASE_URL},
+        {"sqlalchemy.url": DATABASE_URL_SYNC},
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )
