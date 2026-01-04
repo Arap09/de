@@ -6,24 +6,44 @@ from sqlalchemy import (
     String,
     Boolean,
     DateTime,
-    Enum,
     ForeignKey,
+    Enum as SAEnum,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
-from app.database import Base  # ✅ FIXED: single authoritative Base
+from app.database import Base  # single authoritative Base
 
 
+# --------------------------------------------------
+# Tier ENUM (Python)
+# --------------------------------------------------
 class TierEnum(str, enum.Enum):
     sungura = "sungura"
     swara = "swara"
     ndovu = "ndovu"
 
 
+# --------------------------------------------------
+# PostgreSQL ENUM binding (CRITICAL)
+# --------------------------------------------------
+tier_enum = SAEnum(
+    TierEnum,
+    name="tierenum",          # must match DB ENUM name exactly
+    native_enum=True,
+    create_type=False,        # 🔴 DO NOT recreate ENUM
+    validate_strings=True,
+)
+
+
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (
+        UniqueConstraint("email", name="users_email_key"),
+        UniqueConstraint("referral_code", name="ix_users_referral_code"),
+    )
 
     # --------------------------------------------------
     # Primary Key
@@ -42,14 +62,12 @@ class User(Base):
 
     email: Mapped[str] = mapped_column(
         String(255),
-        unique=True,
-        index=True,
         nullable=False,
     )
 
     phone_number: Mapped[str] = mapped_column(
         String(20),
-        unique=True,
+        unique=True,  # matches users_phone_number_key
         nullable=False,
     )
 
@@ -76,7 +94,7 @@ class User(Base):
     # Subscription / Tier
     # --------------------------------------------------
     tier: Mapped[TierEnum] = mapped_column(
-        Enum(TierEnum),
+        tier_enum,
         nullable=False,
         default=TierEnum.sungura,
     )
@@ -89,8 +107,6 @@ class User(Base):
     # --------------------------------------------------
     referral_code: Mapped[str] = mapped_column(
         String(12),
-        unique=True,
-        index=True,
         nullable=False,
     )
 
