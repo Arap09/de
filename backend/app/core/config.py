@@ -16,7 +16,8 @@ class Settings(BaseSettings):
     # --------------------------------------------------
     # Database & Cache
     # --------------------------------------------------
-    DATABASE_URL: str
+    DATABASE_URL: str           # async DB connection (asyncpg)
+    DATABASE_URL_SYNC: str      # sync DB connection (for Alembic migrations)
     REDIS_URL: str
 
     # --------------------------------------------------
