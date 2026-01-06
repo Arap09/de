@@ -31,9 +31,9 @@ class TierEnum(str, enum.Enum):
 # --------------------------------------------------
 tier_enum = SAEnum(
     TierEnum,
-    name="tierenum",          # must match DB ENUM name exactly
+    name="tierenum",
     native_enum=True,
-    create_type=False,        # 🔴 DO NOT recreate ENUM
+    create_type=False,   # DO NOT recreate ENUM
     validate_strings=True,
 )
 
@@ -55,31 +55,53 @@ class User(Base):
     )
 
     # --------------------------------------------------
-    # Identity
+    # Identity (nullable → post-login completion)
     # --------------------------------------------------
-    first_name: Mapped[str] = mapped_column(String(50), nullable=False)
-    last_name: Mapped[str] = mapped_column(String(50), nullable=False)
+    first_name: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+    )
+
+    last_name: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+    )
 
     email: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
     )
 
-    phone_number: Mapped[str] = mapped_column(
+    phone_number: Mapped[str | None] = mapped_column(
         String(20),
-        unique=True,  # matches users_phone_number_key
+        unique=True,
+        nullable=True,
+    )
+
+    country_code: Mapped[str | None] = mapped_column(
+        String(5),
+        nullable=True,
+    )
+
+    # --------------------------------------------------
+    # Authentication (magic-code compatible)
+    # --------------------------------------------------
+    hashed_password: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
         nullable=False,
     )
 
-    country_code: Mapped[str] = mapped_column(String(5), nullable=False)
-
-    # --------------------------------------------------
-    # Authentication
-    # --------------------------------------------------
-    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
-
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    is_email_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_email_verified: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+    )
 
     # --------------------------------------------------
     # Authorization / Role
@@ -99,8 +121,13 @@ class User(Base):
         default=TierEnum.sungura,
     )
 
-    trial_starts_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    trial_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    trial_starts_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+    )
+
+    trial_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+    )
 
     # --------------------------------------------------
     # Referral

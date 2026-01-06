@@ -2,10 +2,14 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.schemas.user import UserCreate, UserLogin, UserRead
+from app.schemas.user import (
+    MagicCodeRequest,
+    MagicCodeVerify,
+    UserRead,
+)
 from app.services.auth import (
-    register_user,
-    authenticate_user,
+    request_magic_code,
+    verify_magic_code,
     get_current_user,
 )
 from app.models.user import User
@@ -18,36 +22,35 @@ router = APIRouter(
 
 
 # --------------------------------------------------
-# Register
+# Request magic code
 # --------------------------------------------------
 @router.post(
-    "/register",
-    response_model=UserRead,
-    status_code=status.HTTP_201_CREATED,
+    "/request-code",
+    status_code=status.HTTP_204_NO_CONTENT,
 )
-async def register(
-    payload: UserCreate,
+async def request_code(
+    payload: MagicCodeRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    return await register_user(db, payload)
+    await request_magic_code(db, payload)
 
 
 # --------------------------------------------------
-# Login
+# Verify magic code
 # --------------------------------------------------
-@router.post("/login")
-async def login(
-    payload: UserLogin,
+@router.post("/verify-code")
+async def verify_code(
+    payload: MagicCodeVerify,
     db: AsyncSession = Depends(get_db),
 ):
-    user = await authenticate_user(
+    access_token = await verify_magic_code(
         db,
         email=payload.email,
-        password=payload.password,
+        code=payload.code,
     )
 
     return {
-        "access_token": user.access_token,
+        "access_token": access_token,
         "token_type": "bearer",
     }
 

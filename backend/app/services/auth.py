@@ -1,99 +1,78 @@
-from fastapi import Depends, HTTPException, status
+import secrets
+from datetime import datetime, timedelta
+
+from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.schemas.user import UserCreate
 from app.models.user import User
+from app.schemas.user import MagicCodeRequest
 from app.crud.user import get_user_by_email, create_user
-from app.core.security import (
-    hash_password,
-    verify_password,
-    create_access_token,
-    decode_access_token,
-    oauth2_scheme,
-)
-from app.db.session import get_db
+from app.core.security import create_access_token
+from app.core.config import settings
+
+
+MAGIC_CODE_EXPIRY_MINUTES = 10
 
 
 # --------------------------------------------------
-# Registration
+# Request magic code
 # --------------------------------------------------
-async def register_user(
+async def request_magic_code(
     db: AsyncSession,
-    payload: UserCreate,
-) -> User:
-    existing = await get_user_by_email(db, payload.email)
-    if existing:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="User with this email already exists",
+    payload: MagicCodeRequest,
+) -> None:
+    user = await get_user_by_email(db, payload.email)
+
+    if not user:
+        user = await create_user(
+            db=db,
+            email=payload.email,
+            tier=payload.tier,
+            referral_code=payload.referral_code,
+            accepts_notifications=payload.accepts_notifications,
+            accepted_terms=payload.accepted_terms,
         )
 
-    user = await create_user(
-        db=db,
-        payload=payload,
-        hashed_password=hash_password(payload.password),
+    code = f"{secrets.randbelow(1_000_000):06d}"
+
+    user.magic_code = code
+    user.magic_code_expires_at = datetime.utcnow() + timedelta(
+        minutes=MAGIC_CODE_EXPIRY_MINUTES
     )
 
-    return user
+    await db.commit()
+
+    # TEMP: log instead of email
+    print(f"[MAGIC CODE] {payload.email}: {code}")
 
 
 # --------------------------------------------------
-# Authentication
+# Verify magic code
 # --------------------------------------------------
-async def authenticate_user(
+async def verify_magic_code(
     db: AsyncSession,
     *,
     email: str,
-    password: str,
-) -> User:
+    code: str,
+) -> str:
     user = await get_user_by_email(db, email)
-    if not user:
+
+    if not user or user.magic_code != code:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password",
+            detail="Invalid magic code",
         )
 
-    if not verify_password(password, user.hashed_password):
+    if not user.magic_code_expires_at or user.magic_code_expires_at < datetime.utcnow():
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password",
+            detail="Magic code expired",
         )
 
-    if not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="User account is inactive",
-        )
+    user.is_email_verified = True
+    user.magic_code = None
+    user.magic_code_expires_at = None
 
-    # Attach JWT dynamically (not persisted)
-    user.access_token = create_access_token(subject=user.email)
-    return user
+    await db.commit()
 
-
-# --------------------------------------------------
-# Current user dependency
-# --------------------------------------------------
-async def get_current_user(
-    token: str = Depends(oauth2_scheme),
-    db: AsyncSession = Depends(get_db),
-) -> User:
-    try:
-        payload = decode_access_token(token)
-        email: str | None = payload.get("sub")
-        if not email:
-            raise ValueError("Missing subject")
-    except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    user = await get_user_by_email(db, email)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found",
-        )
-
-    return user
+    return create_access_token(subject=user.email)
