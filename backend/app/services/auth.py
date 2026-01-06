@@ -4,11 +4,9 @@ from datetime import datetime, timedelta
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.user import User
-from app.schemas.user import MagicCodeRequest
+from app.schemas.user import MagicCodeRequest, UserCreate
 from app.crud.user import get_user_by_email, create_user
 from app.core.security import create_access_token
-from app.core.config import settings
 
 
 MAGIC_CODE_EXPIRY_MINUTES = 10
@@ -24,13 +22,17 @@ async def request_magic_code(
     user = await get_user_by_email(db, payload.email)
 
     if not user:
-        user = await create_user(
-            db=db,
+        user_payload = UserCreate(
             email=payload.email,
             tier=payload.tier,
             referral_code=payload.referral_code,
             accepts_notifications=payload.accepts_notifications,
             accepted_terms=payload.accepted_terms,
+        )
+
+        user = await create_user(
+            db=db,
+            payload=user_payload,
         )
 
     code = f"{secrets.randbelow(1_000_000):06d}"

@@ -11,7 +11,7 @@ class TierEnum(str, Enum):
 
 
 # --------------------------------------------------
-# Email-only signup
+# Email-only signup (magic code)
 # --------------------------------------------------
 class MagicCodeRequest(BaseModel):
     email: EmailStr
@@ -30,6 +30,17 @@ class MagicCodeVerify(BaseModel):
 
 
 # --------------------------------------------------
+# INTERNAL: user creation during magic-code signup
+# --------------------------------------------------
+class UserCreate(BaseModel):
+    email: EmailStr
+    tier: TierEnum = TierEnum.sungura
+    referral_code: Optional[str] = None
+    accepts_notifications: bool = True
+    accepted_terms: bool
+
+
+# --------------------------------------------------
 # Profile completion (post-login)
 # --------------------------------------------------
 class UserProfileUpdate(BaseModel):
@@ -43,7 +54,7 @@ class UserProfileUpdate(BaseModel):
 # API response
 # --------------------------------------------------
 class UserRead(BaseModel):
-    id: str
+    id: int
     email: EmailStr
     tier: TierEnum
     is_email_verified: bool

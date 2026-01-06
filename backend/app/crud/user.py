@@ -7,7 +7,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.user import User, TierEnum
 from app.schemas.user import UserCreate
 from app.core.config import settings
-from app.core.security import hash_password
 
 
 # -----------------------------------
@@ -34,39 +33,22 @@ async def get_user_by_email(
     return result.scalar_one_or_none()
 
 
-async def get_user_by_phone(
-    db: AsyncSession,
-    phone_number: str,
-) -> Optional[User]:
-    result = await db.execute(
-        select(User).where(User.phone_number == phone_number)
-    )
-    return result.scalar_one_or_none()
-
-
 # -----------------------------------
-# Create user
+# Create user (magic-code signup)
 # -----------------------------------
 
 async def create_user(
     db: AsyncSession,
     payload: UserCreate,
     *,
-    hashed_password: str,
-    referral_code: Optional[str] = None,
     referred_by_id: Optional[int] = None,
 ) -> User:
     now = datetime.utcnow()
 
     user = User(
         email=payload.email,
-        first_name=payload.first_name,
-        last_name=payload.last_name,
-        country_code=payload.country_code,
-        phone_number=payload.phone_number,
-        hashed_password=hashed_password,
-        tier=payload.tier or TierEnum.sungura,
-        referral_code=referral_code,
+        tier=payload.tier,
+        referral_code=payload.referral_code,
         referred_by_id=referred_by_id,
         accepts_notifications=payload.accepts_notifications,
         accepted_terms=payload.accepted_terms,
@@ -91,17 +73,6 @@ async def set_email_verified(
     user: User,
 ) -> User:
     user.is_email_verified = True
-    await db.commit()
-    await db.refresh(user)
-    return user
-
-
-async def set_password(
-    db: AsyncSession,
-    user: User,
-    new_password: str,
-) -> User:
-    user.hashed_password = hash_password(new_password)
     await db.commit()
     await db.refresh(user)
     return user
