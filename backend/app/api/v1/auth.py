@@ -56,7 +56,7 @@ async def verify_code(
 
 
 # --------------------------------------------------
-# Current user
+# Current authenticated user
 # --------------------------------------------------
 @router.get(
     "/me",
