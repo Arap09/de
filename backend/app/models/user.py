@@ -104,6 +104,19 @@ class User(Base):
     )
 
     # --------------------------------------------------
+    # Magic Code (for email-first authentication)
+    # --------------------------------------------------
+    magic_code: Mapped[str | None] = mapped_column(
+        String(6),
+        nullable=True,
+    )
+
+    magic_code_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    # --------------------------------------------------
     # Authorization / Role
     # --------------------------------------------------
     role: Mapped[str] = mapped_column(

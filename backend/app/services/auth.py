@@ -1,16 +1,19 @@
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials, OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
+from jose import JWTError, jwt
 
 from app.schemas.user import MagicCodeRequest, UserCreate
 from app.crud.user import get_user_by_email, create_user
 from app.core.security import create_access_token
-
+from app.core.config import settings
+from app.db.session import get_db
+from app.models.user import User
 
 MAGIC_CODE_EXPIRY_MINUTES = 10
-
 
 # --------------------------------------------------
 # Request magic code
@@ -38,7 +41,7 @@ async def request_magic_code(
     code = f"{secrets.randbelow(1_000_000):06d}"
 
     user.magic_code = code
-    user.magic_code_expires_at = datetime.utcnow() + timedelta(
+    user.magic_code_expires_at = datetime.now(timezone.utc) + timedelta(
         minutes=MAGIC_CODE_EXPIRY_MINUTES
     )
 
@@ -65,7 +68,7 @@ async def verify_magic_code(
             detail="Invalid magic code",
         )
 
-    if not user.magic_code_expires_at or user.magic_code_expires_at < datetime.utcnow():
+    if not user.magic_code_expires_at or user.magic_code_expires_at < datetime.now(timezone.utc):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Magic code expired",
@@ -78,17 +81,11 @@ async def verify_magic_code(
     await db.commit()
 
     return create_access_token(subject=user.email)
-from fastapi import Depends
-from fastapi.security import OAuth2PasswordBearer
-from jose import JWTError, jwt
-
-from app.core.config import settings
-from app.db.session import get_db
-from app.models.user import User
-from app.crud.user import get_user_by_email
 
 
-# Used by Swagger UI and protected routes
+# --------------------------------------------------
+# OAuth2 dependency (existing)
+# --------------------------------------------------
 oauth2_scheme = OAuth2PasswordBearer(
     tokenUrl="/api/v1/auth/verify-code"
 )
@@ -126,3 +123,20 @@ async def get_current_user(
         raise credentials_exception
 
     return user
+
+
+# --------------------------------------------------
+# Swagger UI Bearer token helper
+# --------------------------------------------------
+bearer_scheme = HTTPBearer()
+
+async def get_current_user_swagger(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """
+    Helper for Swagger UI to authenticate JWT bearer token.
+    Can be used in docs as a security dependency.
+    """
+    token = credentials.credentials
+    return await get_current_user(token=token, db=db)
