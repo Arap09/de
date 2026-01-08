@@ -27,9 +27,11 @@ def verify_password(password: str, hashed: str) -> bool:
 # --------------------------------------------------
 # OAuth2 / JWT
 # --------------------------------------------------
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(
+    tokenUrl="/api/v1/auth/magic-code"
+)
 
-ALGORITHM = "HS256"
+ALGORITHM = settings.JWT_ALGORITHM
 
 
 def create_access_token(
@@ -62,6 +64,7 @@ def decode_access_token(token: str) -> dict[str, Any]:
             token,
             settings.SECRET_KEY,
             algorithms=[ALGORITHM],
+            issuer=settings.APP_NAME,
         )
     except JWTError as exc:
-        raise ValueError("Invalid or expired token") from exc
+        raise ValueError("Invalid token") from exc

@@ -4,12 +4,10 @@ from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException, status, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
-from jose import JWTError, jwt
 
 from app.schemas.user import MagicCodeRequest, UserCreate
 from app.crud.user import get_user_by_email, create_user
-from app.core.security import create_access_token
-from app.core.config import settings
+from app.core.security import create_access_token, decode_access_token
 from app.db.session import get_db
 from app.models.user import User
 
@@ -105,18 +103,12 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    token = credentials.credentials
-
     try:
-        payload = jwt.decode(
-            token,
-            settings.SECRET_KEY,
-            algorithms=["HS256"],  # MUST match create_access_token
-        )
+        payload = decode_access_token(credentials.credentials)
         email: str | None = payload.get("sub")
-        if email is None:
+        if not email:
             raise HTTPException(status_code=401)
-    except JWTError:
+    except ValueError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token",

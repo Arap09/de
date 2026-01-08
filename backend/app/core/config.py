@@ -13,12 +13,13 @@ class Settings(BaseSettings):
     # Security
     # --------------------------------------------------
     SECRET_KEY: str
+    JWT_ALGORITHM: str = "HS256"
 
     # --------------------------------------------------
     # Database & Cache
     # --------------------------------------------------
-    DATABASE_URL_ASYNC: str      # asyncpg (FastAPI runtime)
-    DATABASE_URL_SYNC: str       # psycopg (Alembic, psql)
+    DATABASE_URL_ASYNC: str
+    DATABASE_URL_SYNC: str
     REDIS_URL: str
 
     # --------------------------------------------------
@@ -56,3 +57,15 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# --------------------------------------------------
+# Sanity checks (JWT-critical)
+# --------------------------------------------------
+if not settings.SECRET_KEY or settings.SECRET_KEY.strip() == "":
+    raise RuntimeError("SECRET_KEY is missing or empty. JWT validation will fail.")
+
+if settings.SECRET_KEY.lower() in {"changeme", "change-me", "default"}:
+    raise RuntimeError(
+        "SECRET_KEY is set to an insecure placeholder. "
+        "JWT tokens generated with this key should not be trusted."
+    )

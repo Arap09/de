@@ -63,6 +63,7 @@ async def verify_code(
     response_model=UserRead,
 )
 async def me(
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     return current_user
