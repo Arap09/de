@@ -2,12 +2,16 @@ import secrets
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, status, Depends
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.schemas.user import MagicCodeRequest, UserCreate
 from app.crud.user import get_user_by_email, create_user
-from app.core.security import create_access_token, decode_access_token
+from app.core.security import (
+    create_access_token,
+    decode_access_token,
+    bearer_scheme,
+)
 from app.db.session import get_db
 from app.models.user import User
 
@@ -30,11 +34,7 @@ async def request_magic_code(
             accepts_notifications=payload.accepts_notifications,
             accepted_terms=payload.accepted_terms,
         )
-
-        user = await create_user(
-            db=db,
-            payload=user_payload,
-        )
+        user = await create_user(db=db, payload=user_payload)
 
     code = f"{secrets.randbelow(1_000_000):06d}"
 
@@ -50,7 +50,7 @@ async def request_magic_code(
 
 
 # --------------------------------------------------
-# Verify magic code
+# Verify magic code (issues JWT)
 # --------------------------------------------------
 async def verify_magic_code(
     db: AsyncSession,
@@ -66,7 +66,10 @@ async def verify_magic_code(
             detail="Invalid magic code",
         )
 
-    if not user.magic_code_expires_at or user.magic_code_expires_at < datetime.now(timezone.utc):
+    if (
+        not user.magic_code_expires_at
+        or user.magic_code_expires_at < datetime.now(timezone.utc)
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Magic code expired",
@@ -82,11 +85,8 @@ async def verify_magic_code(
 
 
 # --------------------------------------------------
-# JWT Bearer authentication (Swagger-compatible)
+# Get current authenticated user (FINAL)
 # --------------------------------------------------
-bearer_scheme = HTTPBearer(auto_error=False)
-
-
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
     db: AsyncSession = Depends(get_db),
@@ -95,24 +95,20 @@ async def get_current_user(
     Resolve the currently authenticated user from a JWT access token.
     Used by protected endpoints such as /auth/me.
     """
-
-    if credentials is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
     try:
         payload = decode_access_token(credentials.credentials)
         email: str | None = payload.get("sub")
+
         if not email:
-            raise HTTPException(status_code=401)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token missing subject",
+            )
+
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token",
-            headers={"WWW-Authenticate": "Bearer"},
         )
 
     user = await get_user_by_email(db, email)

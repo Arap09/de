@@ -3,12 +3,12 @@ from typing import Any, Optional
 
 from jose import jwt, JWTError
 from passlib.context import CryptContext
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import HTTPBearer
 
 from app.core.config import settings
 
 # --------------------------------------------------
-# Password hashing
+# Password hashing (kept for future use)
 # --------------------------------------------------
 pwd_context = CryptContext(
     schemes=["bcrypt"],
@@ -25,11 +25,9 @@ def verify_password(password: str, hashed: str) -> bool:
 
 
 # --------------------------------------------------
-# OAuth2 / JWT
+# HTTP Bearer / JWT  (CORRECT for passwordless auth)
 # --------------------------------------------------
-oauth2_scheme = OAuth2PasswordBearer(
-    tokenUrl="/api/v1/auth/magic-code"
-)
+bearer_scheme = HTTPBearer(auto_error=True)
 
 ALGORITHM = settings.JWT_ALGORITHM
 
