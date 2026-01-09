@@ -1,7 +1,8 @@
 from datetime import datetime, timedelta
 from typing import Optional
+import uuid
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User, TierEnum
@@ -15,7 +16,7 @@ from app.core.config import settings
 
 async def get_user_by_id(
     db: AsyncSession,
-    user_id: int,
+    user_id: uuid.UUID,  # FIX: UUID, not int
 ) -> Optional[User]:
     result = await db.execute(
         select(User).where(User.id == user_id)
@@ -28,7 +29,9 @@ async def get_user_by_email(
     email: str,
 ) -> Optional[User]:
     result = await db.execute(
-        select(User).where(User.email == email)
+        select(User).where(
+            func.lower(User.email) == func.lower(email)  # FIX: case-insensitive
+        )
     )
     return result.scalar_one_or_none()
 
@@ -41,14 +44,14 @@ async def create_user(
     db: AsyncSession,
     payload: UserCreate,
     *,
-    referred_by_id: Optional[int] = None,
+    referred_by_id: Optional[uuid.UUID] = None,  # FIX: UUID
 ) -> User:
     now = datetime.utcnow()
 
     user = User(
-        email=payload.email,
+        email=payload.email.lower(),  # FIX: normalize email
         tier=payload.tier,
-        referral_code=payload.referral_code,
+        referral_code=None,  # FIX: do NOT reuse referrer code
         referred_by_id=referred_by_id,
         accepts_notifications=payload.accepts_notifications,
         accepted_terms=payload.accepted_terms,
@@ -59,7 +62,7 @@ async def create_user(
     )
 
     db.add(user)
-    await db.commit()
+    await db.flush()     # FIX: no commit here
     await db.refresh(user)
     return user
 
@@ -73,7 +76,7 @@ async def set_email_verified(
     user: User,
 ) -> User:
     user.is_email_verified = True
-    await db.commit()
+    await db.flush()     # FIX: flush instead of commit
     await db.refresh(user)
     return user
 
@@ -84,6 +87,6 @@ async def upgrade_tier(
     new_tier: TierEnum,
 ) -> User:
     user.tier = new_tier
-    await db.commit()
+    await db.flush()     # FIX: flush instead of commit
     await db.refresh(user)
     return user

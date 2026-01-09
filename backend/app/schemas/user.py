@@ -1,5 +1,7 @@
 from datetime import datetime
 from typing import Optional
+from uuid import UUID  # FIX: UUID import
+
 from pydantic import BaseModel, EmailStr, Field
 from enum import Enum
 
@@ -54,7 +56,7 @@ class UserProfileUpdate(BaseModel):
 # API response
 # --------------------------------------------------
 class UserRead(BaseModel):
-    id: int
+    id: UUID  # FIX: UUID, not int
     email: EmailStr
     tier: TierEnum
     is_email_verified: bool
