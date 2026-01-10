@@ -46,7 +46,7 @@ async def request_magic_code(
     await db.commit()
 
     # TEMP: log instead of email
-    print(f"[MAGIC CODE] {payload.email}: {code}")
+    
 
 
 # --------------------------------------------------
