@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException, status, Depends
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import update
 
 from app.schemas.user import MagicCodeRequest, UserCreate
 from app.crud.user import get_user_by_email, create_user
@@ -17,6 +18,24 @@ from app.models.user import User
 
 MAGIC_CODE_EXPIRY_MINUTES = 10
 
+
+# --------------------------------------------------
+# Helper: Purge all expired magic codes globally
+# --------------------------------------------------
+async def purge_expired_magic_codes(db: AsyncSession) -> None:
+    """
+    Remove all expired magic codes from the database.
+    Can be called at startup, periodically, or during requests.
+    """
+    stmt = (
+        update(User)
+        .where(User.magic_code_expires_at < datetime.now(timezone.utc))
+        .values(magic_code=None, magic_code_expires_at=None)
+    )
+    await db.execute(stmt)
+    await db.commit()
+
+
 # --------------------------------------------------
 # Request magic code
 # --------------------------------------------------
@@ -24,6 +43,13 @@ async def request_magic_code(
     db: AsyncSession,
     payload: MagicCodeRequest,
 ) -> None:
+    """
+    Generate a new magic code for the given email.
+    Also clears expired magic codes for this user before issuing a new code.
+    """
+    # Optional: purge all expired codes globally (lightweight for small DB)
+    await purge_expired_magic_codes(db)
+
     user = await get_user_by_email(db, payload.email)
 
     if not user:
@@ -35,18 +61,21 @@ async def request_magic_code(
             accepted_terms=payload.accepted_terms,
         )
         user = await create_user(db=db, payload=user_payload)
+    else:
+        # Inline cleanup: remove expired code for this specific user
+        if user.magic_code_expires_at and user.magic_code_expires_at < datetime.now(timezone.utc):
+            user.magic_code = None
+            user.magic_code_expires_at = None
+            await db.commit()
 
+    # Generate a new 6-digit code
     code = f"{secrets.randbelow(1_000_000):06d}"
-
     user.magic_code = code
     user.magic_code_expires_at = datetime.now(timezone.utc) + timedelta(
         minutes=MAGIC_CODE_EXPIRY_MINUTES
     )
 
     await db.commit()
-
-    # TEMP: log instead of email
-    
 
 
 # --------------------------------------------------
@@ -58,6 +87,10 @@ async def verify_magic_code(
     email: str,
     code: str,
 ) -> str:
+    """
+    Verify a magic code and return a JWT if valid.
+    Clears the code after successful verification.
+    """
     user = await get_user_by_email(db, email)
 
     if not user or user.magic_code != code:
@@ -66,26 +99,23 @@ async def verify_magic_code(
             detail="Invalid magic code",
         )
 
-    if (
-        not user.magic_code_expires_at
-        or user.magic_code_expires_at < datetime.now(timezone.utc)
-    ):
+    if not user.magic_code_expires_at or user.magic_code_expires_at < datetime.now(timezone.utc):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Magic code expired",
         )
 
+    # Mark email verified and clear magic code
     user.is_email_verified = True
     user.magic_code = None
     user.magic_code_expires_at = None
-
     await db.commit()
 
     return create_access_token(subject=user.email)
 
 
 # --------------------------------------------------
-# Get current authenticated user (FINAL)
+# Get current authenticated user
 # --------------------------------------------------
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
@@ -104,7 +134,6 @@ async def get_current_user(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Token missing subject",
             )
-
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
