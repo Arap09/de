@@ -36,21 +36,31 @@ async def request_code(
 
 
 # --------------------------------------------------
-# Verify magic code
+# Verify magic code (login / first signup)
 # --------------------------------------------------
 @router.post("/verify-code")
 async def verify_code(
     payload: MagicCodeVerify,
     db: AsyncSession = Depends(get_db),
 ):
-    access_token = await verify_magic_code(
+    """
+    This endpoint:
+    - Verifies the magic code
+    - Creates user if needed
+    - Creates tenant if first login
+    - Assigns OWNER role on tenant creation
+    - Returns JWT access token
+    """
+
+    result = await verify_magic_code(
         db,
         email=payload.email,
         code=payload.code,
     )
 
+    # We intentionally keep the response minimal
     return {
-        "access_token": access_token,
+        "access_token": result["access_token"],
         "token_type": "bearer",
     }
 
@@ -63,7 +73,6 @@ async def verify_code(
     response_model=UserRead,
 )
 async def me(
-    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     return current_user
