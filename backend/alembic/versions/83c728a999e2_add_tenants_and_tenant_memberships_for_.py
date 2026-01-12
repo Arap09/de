@@ -9,7 +9,6 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-# revision identifiers, used by Alembic.
 revision = "83c728a999e2"
 down_revision = "e15df335adb8"
 branch_labels = None
@@ -18,7 +17,7 @@ depends_on = None
 
 def upgrade() -> None:
     # --------------------------------------------------
-    # Tenant role enum (safe creation)
+    # Tenant role enum (explicit, safe)
     # --------------------------------------------------
     tenant_role_enum = postgresql.ENUM(
         "OWNER",
@@ -26,6 +25,7 @@ def upgrade() -> None:
         "MANAGER",
         "AGENT",
         name="tenant_role_enum",
+        create_type=False,
     )
     tenant_role_enum.create(op.get_bind(), checkfirst=True)
 
@@ -79,13 +79,7 @@ def upgrade() -> None:
         ),
         sa.Column(
             "role",
-            sa.Enum(
-                "OWNER",
-                "ADMIN",
-                "MANAGER",
-                "AGENT",
-                name="tenant_role_enum",
-            ),
+            tenant_role_enum,
             nullable=False,
         ),
         sa.Column(

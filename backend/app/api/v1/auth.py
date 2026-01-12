@@ -5,7 +5,6 @@ from app.db.session import get_db
 from app.schemas.user import (
     MagicCodeRequest,
     MagicCodeVerify,
-    UserRead,
 )
 from app.services.auth import (
     request_magic_code,
@@ -13,6 +12,10 @@ from app.services.auth import (
     get_current_user,
 )
 from app.models.user import User
+
+# NEW IMPORTS FOR TENANT RBAC
+from app.api.deps.rbac import get_current_membership
+from app.models.tenant_membership import TenantMembership
 
 
 router = APIRouter(
@@ -58,7 +61,6 @@ async def verify_code(
         code=payload.code,
     )
 
-    # We intentionally keep the response minimal
     return {
         "access_token": result["access_token"],
         "token_type": "bearer",
@@ -66,13 +68,28 @@ async def verify_code(
 
 
 # --------------------------------------------------
-# Current authenticated user
+# Current authenticated user (TENANT-AWARE)
 # --------------------------------------------------
-@router.get(
-    "/me",
-    response_model=UserRead,
-)
+@router.get("/me")
 async def me(
     current_user: User = Depends(get_current_user),
+    membership: TenantMembership = Depends(get_current_membership),
 ):
-    return current_user
+    """
+    Tenant-aware identity endpoint.
+
+    Requires:
+    - Authorization: Bearer <token>
+    - X-Tenant-Id header
+    """
+
+    return {
+        "user": {
+            "id": current_user.id,
+            "email": current_user.email,
+        },
+        "tenant": {
+            "id": membership.tenant_id,
+        },
+        "role": membership.role,
+    }

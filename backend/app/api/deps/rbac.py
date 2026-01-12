@@ -7,7 +7,7 @@ from app.models.tenant_membership import TenantMembership
 from app.core.roles import TenantRole
 from app.core.rbac import role_at_least
 from app.api.deps.tenant import get_current_tenant_id
-from app.api.deps.auth import get_current_user
+from app.services.auth import get_current_user
 from app.models.user import User
 
 
