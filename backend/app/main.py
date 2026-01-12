@@ -15,6 +15,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.api.v1.auth import router as auth_router
 
+# --------------------------------------------------
+# 🔑 Force model registration at application startup
+# --------------------------------------------------
+import app.models  # noqa: F401
+
 
 def create_application() -> FastAPI:
     app = FastAPI(

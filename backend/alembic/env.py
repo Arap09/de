@@ -36,10 +36,10 @@ if "asyncpg" in DATABASE_URL_SYNC:
     )
 
 # -------------------------------------------------------------------
-# Import metadata AND MODELS
+# 🔑 Import CANONICAL Base and ALL MODELS
 # -------------------------------------------------------------------
-from app.database import Base  # noqa: E402
-import app.models  # noqa: E402
+from app.db.base import Base  # ✅ canonical Base (FIXED)
+import app.models  # noqa: E402  # ensures all models are registered
 
 # -------------------------------------------------------------------
 # Alembic configuration

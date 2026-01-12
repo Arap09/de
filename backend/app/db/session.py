@@ -11,6 +11,12 @@ from sqlalchemy.ext.asyncio import (
 from app.core.config import settings
 
 # --------------------------------------------------
+# 🔑 IMPORTANT: Import models to register metadata
+# --------------------------------------------------
+import app.models  # noqa: F401
+
+
+# --------------------------------------------------
 # Async SQLAlchemy Engine (FastAPI runtime)
 # --------------------------------------------------
 engine = create_async_engine(

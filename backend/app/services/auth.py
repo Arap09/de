@@ -16,7 +16,7 @@ from app.core.security import (
 from app.db.session import get_db
 from app.models.user import User
 
-# NEW imports
+# Tenant / RBAC imports
 from app.models.tenant import Tenant
 from app.models.tenant_membership import TenantMembership
 from app.core.roles import TenantRole
@@ -50,7 +50,7 @@ async def request_magic_code(
 ) -> None:
     """
     Generate a new magic code for the given email.
-    Also clears expired magic codes for this user before issuing a new code.
+    Also clears expired magic codes before issuing a new one.
     """
     await purge_expired_magic_codes(db)
 
@@ -91,9 +91,9 @@ async def verify_magic_code(
     *,
     email: str,
     code: str,
-) -> str:
+) -> dict:
     """
-    Verify a magic code and return a JWT if valid.
+    Verify a magic code and return a JWT payload if valid.
     On first successful login, bootstrap a Tenant
     and assign the user as OWNER.
     """
@@ -136,7 +136,7 @@ async def verify_magic_code(
             created_by=user.id,
         )
         db.add(tenant)
-        await db.flush()  # tenant.id available
+        await db.flush()
 
         membership = TenantMembership(
             user_id=user.id,
@@ -147,7 +147,10 @@ async def verify_magic_code(
         db.add(membership)
         await db.commit()
 
-    return create_access_token(subject=user.email)
+    return {
+        "access_token": create_access_token(subject=user.email),
+        "token_type": "bearer",
+    }
 
 
 # --------------------------------------------------
