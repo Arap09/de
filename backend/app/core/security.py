@@ -25,7 +25,7 @@ def verify_password(password: str, hashed: str) -> bool:
 
 
 # --------------------------------------------------
-# HTTP Bearer / JWT  (CORRECT for passwordless auth)
+# HTTP Bearer / JWT (Passwordless / Magic Code)
 # --------------------------------------------------
 bearer_scheme = HTTPBearer(auto_error=True)
 
@@ -46,6 +46,7 @@ def create_access_token(
         "iss": settings.APP_NAME,
     }
 
+    # CRITICAL: tenant_id must be injected via extra_claims
     if extra_claims:
         payload.update(extra_claims)
 

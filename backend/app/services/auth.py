@@ -30,7 +30,6 @@ MAGIC_CODE_EXPIRY_MINUTES = 10
 async def purge_expired_magic_codes(db: AsyncSession) -> None:
     """
     Remove all expired magic codes from the database.
-    Can be called at startup, periodically, or during requests.
     """
     stmt = (
         update(User)
@@ -50,7 +49,6 @@ async def request_magic_code(
 ) -> None:
     """
     Generate a new magic code for the given email.
-    Also clears expired magic codes before issuing a new one.
     """
     await purge_expired_magic_codes(db)
 
@@ -84,7 +82,7 @@ async def request_magic_code(
 
 
 # --------------------------------------------------
-# Verify magic code (issues JWT + bootstrap tenant)
+# Verify magic code (ISSUES TENANT-AWARE JWT)
 # --------------------------------------------------
 async def verify_magic_code(
     db: AsyncSession,
@@ -93,9 +91,13 @@ async def verify_magic_code(
     code: str,
 ) -> dict:
     """
-    Verify a magic code and return a JWT payload if valid.
-    On first successful login, bootstrap a Tenant
-    and assign the user as OWNER.
+    Verify a magic code and issue a TENANT-AWARE JWT.
+
+    Behavior:
+    - Verifies magic code
+    - Creates tenant + OWNER role on first login
+    - Resolves the active tenant
+    - Embeds tenant_id into JWT
     """
     user = await get_user_by_email(db, email)
 
@@ -122,21 +124,22 @@ async def verify_magic_code(
     await db.refresh(user)
 
     # --------------------------------------------------
-    # Bootstrap tenant + OWNER role (first login only)
+    # Resolve or bootstrap tenant membership
     # --------------------------------------------------
     stmt = select(TenantMembership).where(
         TenantMembership.user_id == user.id
     )
     result = await db.execute(stmt)
-    existing_membership = result.scalar_one_or_none()
+    membership = result.scalar_one_or_none()
 
-    if not existing_membership:
+    # First login → create tenant + OWNER role
+    if not membership:
         tenant = Tenant(
             name=f"{user.email.split('@')[0]}'s Workspace",
             created_by=user.id,
         )
         db.add(tenant)
-        await db.flush()
+        await db.flush()  # get tenant.id
 
         membership = TenantMembership(
             user_id=user.id,
@@ -146,23 +149,34 @@ async def verify_magic_code(
         )
         db.add(membership)
         await db.commit()
+        await db.refresh(membership)
+
+    # --------------------------------------------------
+    # ISSUE TENANT-AWARE ACCESS TOKEN (CRITICAL FIX)
+    # --------------------------------------------------
+    access_token = create_access_token(
+        subject=user.email,
+        extra_claims={
+            "tenant_id": str(membership.tenant_id),
+        },
+    )
 
     return {
-        "access_token": create_access_token(subject=user.email),
-        "token_type": "bearer",
+        "access_token": access_token,
+        "tenant_id": membership.tenant_id,
     }
 
 
 # --------------------------------------------------
-# Get current authenticated user
+# Get current authenticated user (IDENTITY ONLY)
 # --------------------------------------------------
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
     db: AsyncSession = Depends(get_db),
 ) -> User:
     """
-    Resolve the currently authenticated user from a JWT access token.
-    Used by protected endpoints such as /auth/me.
+    Resolve the authenticated user from JWT.
+    Tenant validation is intentionally NOT done here.
     """
     try:
         payload = decode_access_token(credentials.credentials)

@@ -1,21 +1,27 @@
 from uuid import UUID
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Header, HTTPException, status
 
 
 async def get_current_tenant_id(
-    x_tenant_id: str | None = Header(default=None),
+    x_tenant_id: str = Header(..., alias="X-Tenant-Id"),
 ) -> UUID:
-    if not x_tenant_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="X-Tenant-Id header is required",
-        )
+    """
+    Extract and validate tenant ID from request headers.
 
+    Responsibilities:
+    - Require X-Tenant-Id header
+    - Validate UUID format
+    - Return UUID instance
+
+    Does NOT:
+    - Decode JWT
+    - Perform membership checks
+    """
     try:
         return UUID(x_tenant_id)
-    except ValueError:
+    except (ValueError, TypeError):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid tenant id",
+            detail="Invalid X-Tenant-Id",
         )

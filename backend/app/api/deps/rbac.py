@@ -1,6 +1,7 @@
 from fastapi import Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from uuid import UUID
 
 from app.db.session import get_db
 from app.models.tenant_membership import TenantMembership
@@ -13,9 +14,12 @@ from app.models.user import User
 
 async def get_current_membership(
     current_user: User = Depends(get_current_user),
-    tenant_id=Depends(get_current_tenant_id),
+    tenant_id: UUID = Depends(get_current_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> TenantMembership:
+    """
+    Resolve the user's active membership for the current tenant.
+    """
     result = await db.execute(
         select(TenantMembership).where(
             TenantMembership.user_id == current_user.id,

@@ -2,10 +2,7 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.schemas.user import (
-    MagicCodeRequest,
-    MagicCodeVerify,
-)
+from app.schemas.user import MagicCodeRequest, MagicCodeVerify
 from app.services.auth import (
     request_magic_code,
     verify_magic_code,
@@ -13,16 +10,14 @@ from app.services.auth import (
 )
 from app.models.user import User
 
-# NEW IMPORTS FOR TENANT RBAC
+# TENANT / RBAC
 from app.api.deps.rbac import get_current_membership
 from app.models.tenant_membership import TenantMembership
-
 
 router = APIRouter(
     prefix="/auth",
     tags=["Auth"],
 )
-
 
 # --------------------------------------------------
 # Request magic code
@@ -52,7 +47,7 @@ async def verify_code(
     - Creates user if needed
     - Creates tenant if first login
     - Assigns OWNER role on tenant creation
-    - Returns JWT access token
+    - Returns JWT access token (TENANT-AWARE)
     """
 
     result = await verify_magic_code(
@@ -61,9 +56,17 @@ async def verify_code(
         code=payload.code,
     )
 
+    # REQUIRED CONTRACT:
+    # verify_magic_code MUST return:
+    # {
+    #   "access_token": str,
+    #   "tenant_id": UUID
+    # }
+
     return {
         "access_token": result["access_token"],
         "token_type": "bearer",
+        "tenant_id": result["tenant_id"],
     }
 
 
