@@ -11,7 +11,7 @@ from app.services.auth import (
 from app.models.user import User
 
 # TENANT / RBAC
-from app.api.deps.rbac import get_current_membership
+from app.api.deps import get_current_membership
 from app.models.tenant_membership import TenantMembership
 
 router = APIRouter(
@@ -95,4 +95,30 @@ async def me(
             "id": membership.tenant_id,
         },
         "role": membership.role,
+    }
+# --------------------------------------------------
+# TEMPORARY RBAC TEST ENDPOINT (DELETE AFTER TESTING)
+# --------------------------------------------------
+from fastapi import Depends
+from app.core.rbac import require_roles
+from app.core.roles import TenantRole
+from app.models.tenant_membership import TenantMembership
+
+@router.get("/rbac-test/owner-only", tags=["RBAC Test"])
+async def rbac_owner_only(
+    membership: TenantMembership = Depends(require_roles([TenantRole.OWNER])),
+):
+    """
+    TEMPORARY endpoint.
+
+    Access rules:
+    - Must be authenticated
+    - Must belong to tenant (X-Tenant-Id)
+    - Must have OWNER role
+    """
+
+    return {
+        "message": "RBAC check passed",
+        "role": membership.role,
+        "tenant_id": membership.tenant_id,
     }
