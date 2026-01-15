@@ -145,9 +145,9 @@ class User(Base):
     # --------------------------------------------------
     # Referral
     # --------------------------------------------------
-    referral_code: Mapped[str] = mapped_column(
+    referral_code: Mapped[str | None] = mapped_column(
         String(12),
-        nullable=False,
+        nullable=True,   # ✅ FIXED: referral codes are optional
     )
 
     referred_by_id: Mapped[uuid.UUID | None] = mapped_column(

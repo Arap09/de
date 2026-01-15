@@ -22,6 +22,14 @@ class Tenant(Base):
         nullable=True,
     )
 
+    # --------------------------------------------------
+    # Referral (Tenant acquisition – OPTIONAL)
+    # --------------------------------------------------
+    referral_code_used = Column(
+        String(12),
+        nullable=True,
+    )
+
     created_at = Column(
         DateTime(timezone=True),
         server_default=func.now(),
