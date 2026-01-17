@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, status
+from datetime import datetime
+from fastapi import APIRouter, Depends, status, HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
@@ -10,9 +12,13 @@ from app.services.auth import (
 )
 from app.models.user import User
 
-# TENANT / RBAC
-from app.api.deps import get_current_membership
+# TENANT / RBAC / CONSENT
+from app.api.deps import (
+    get_current_membership,
+    require_consent,  # Consent gate (post-auth)
+)
 from app.models.tenant_membership import TenantMembership
+from app.models.user_consent import UserConsent
 
 router = APIRouter(
     prefix="/auth",
@@ -30,6 +36,11 @@ async def request_code(
     payload: MagicCodeRequest,
     db: AsyncSession = Depends(get_db),
 ):
+    """
+    Entry point for all identities.
+    NO business logic.
+    NO consent logic.
+    """
     await request_magic_code(db, payload)
 
 
@@ -47,7 +58,11 @@ async def verify_code(
     - Creates user if needed
     - Creates tenant if first login
     - Assigns OWNER role on tenant creation
-    - Returns JWT access token (TENANT-AWARE)
+    - Returns JWT access token
+
+    IMPORTANT:
+    - No consent checks here
+    - Consent is enforced post-auth
     """
 
     result = await verify_magic_code(
@@ -55,13 +70,6 @@ async def verify_code(
         email=payload.email,
         code=payload.code,
     )
-
-    # REQUIRED CONTRACT:
-    # verify_magic_code MUST return:
-    # {
-    #   "access_token": str,
-    #   "tenant_id": UUID
-    # }
 
     return {
         "access_token": result["access_token"],
@@ -71,12 +79,13 @@ async def verify_code(
 
 
 # --------------------------------------------------
-# Current authenticated user (TENANT-AWARE)
+# Current authenticated user (TENANT + CONSENT AWARE)
 # --------------------------------------------------
 @router.get("/me")
 async def me(
     current_user: User = Depends(get_current_user),
     membership: TenantMembership = Depends(get_current_membership),
+    _: bool = Depends(require_consent),
 ):
     """
     Tenant-aware identity endpoint.
@@ -84,6 +93,7 @@ async def me(
     Requires:
     - Authorization: Bearer <token>
     - X-Tenant-Id header
+    - Role-specific consent acceptance
     """
 
     return {
@@ -96,29 +106,73 @@ async def me(
         },
         "role": membership.role,
     }
-# --------------------------------------------------
-# TEMPORARY RBAC TEST ENDPOINT (DELETE AFTER TESTING)
-# --------------------------------------------------
-from fastapi import Depends
-from app.core.rbac import require_roles
-from app.core.roles import TenantRole
-from app.models.tenant_membership import TenantMembership
 
-@router.get("/rbac-test/owner-only", tags=["RBAC Test"])
-async def rbac_owner_only(
-    membership: TenantMembership = Depends(require_roles([TenantRole.OWNER])),
+
+# --------------------------------------------------
+# Accept role-specific consent (POST-AUTH)
+# --------------------------------------------------
+@router.post("/consent/accept", status_code=status.HTTP_204_NO_CONTENT)
+async def accept_consent(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    membership: TenantMembership = Depends(get_current_membership),
 ):
     """
-    TEMPORARY endpoint.
+    Accept role-specific terms and conditions.
 
-    Access rules:
-    - Must be authenticated
-    - Must belong to tenant (X-Tenant-Id)
-    - Must have OWNER role
+    DESIGN:
+    - Post-auth only
+    - Tenant-scoped
+    - Role-scoped
+    - Idempotent
     """
 
+    stmt = (
+        select(UserConsent)
+        .where(UserConsent.user_id == current_user.id)
+        .where(UserConsent.tenant_id == membership.tenant_id)
+        .where(UserConsent.role == membership.role)
+        .where(UserConsent.revoked_at.is_(None))
+    )
+
+    result = await db.execute(stmt)
+    existing = result.scalar_one_or_none()
+
+    if existing:
+        return
+
+    consent = UserConsent(
+        user_id=current_user.id,
+        tenant_id=membership.tenant_id,
+        role=membership.role,
+        accepted_at=datetime.utcnow(),
+    )
+
+    db.add(consent)
+    await db.commit()
+
+
+# --------------------------------------------------
+# Check consent status (frontend bootstrap)
+# --------------------------------------------------
+@router.get("/consent/status")
+async def consent_status(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    membership: TenantMembership = Depends(get_current_membership),
+):
+    stmt = (
+        select(UserConsent)
+        .where(UserConsent.user_id == current_user.id)
+        .where(UserConsent.tenant_id == membership.tenant_id)
+        .where(UserConsent.role == membership.role)
+        .where(UserConsent.revoked_at.is_(None))
+    )
+
+    result = await db.execute(stmt)
+    consent = result.scalar_one_or_none()
+
     return {
-        "message": "RBAC check passed",
         "role": membership.role,
-        "tenant_id": membership.tenant_id,
+        "consent_accepted": bool(consent),
     }
