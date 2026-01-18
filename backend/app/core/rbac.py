@@ -49,3 +49,45 @@ def require_roles(allowed_roles: Iterable[TenantRole]):
         return membership
 
     return role_checker
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.session import get_db
+from app.services.auth import get_current_user
+from app.models.user import User
+from app.models.platform_membership import PlatformMembership
+
+
+def require_platform_roles(allowed_roles):
+    """
+    FastAPI dependency to enforce that the current user has an active platform membership
+    with one of the allowed platform roles (e.g. SUPER_ADMIN, PLATFORM_ADMIN).
+
+    Usage:
+        __ = Depends(require_platform_roles([PlatformRole.SUPER_ADMIN, PlatformRole.PLATFORM_ADMIN]))
+    """
+
+    async def _dep(
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+    ):
+        stmt = select(PlatformMembership).where(PlatformMembership.user_id == current_user.id)
+        res = await db.execute(stmt)
+        pm = res.scalar_one_or_none()
+
+        if not pm or not pm.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Platform access required",
+            )
+
+        allowed = {r.value if hasattr(r, "value") else str(r) for r in allowed_roles}
+        if pm.role not in allowed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Insufficient platform permissions",
+            )
+
+        return True
+
+    return _dep

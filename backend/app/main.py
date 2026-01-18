@@ -14,6 +14,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.api.v1.auth import router as auth_router
+from app.api.v1.platform_invitations import router as platform_invitations_router
+from app.api.v1.platform_sales import router as platform_sales_router
 
 # --------------------------------------------------
 # 🔑 Force model registration at application startup
@@ -41,10 +43,9 @@ def create_application() -> FastAPI:
     # --------------------------------------------------
     # API Routers
     # --------------------------------------------------
-    app.include_router(
-        auth_router,
-        prefix="/api/v1",
-    )
+    app.include_router(auth_router, prefix="/api/v1")
+    app.include_router(platform_invitations_router, prefix="/api/v1")
+    app.include_router(platform_sales_router, prefix="/api/v1")
 
     # --------------------------------------------------
     # Health check
