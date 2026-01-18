@@ -11,16 +11,17 @@ from app.models.user_consent import UserConsent
 # Invitations (Tenant)
 from app.models.tenant_invitation import TenantInvitation
 
-# Existing models you mentioned (register them as well)
+# Existing models
 from app.models.audit_log import AuditLog
 from app.models.email_verification import EmailVerification
 from app.models.referral import Referral
 
-# Platform / Sales (NEW)
+# Platform / Sales
 from app.models.platform_membership import PlatformMembership
 from app.models.platform_invitation import PlatformInvitation
 from app.models.salesperson_profile import SalespersonProfile
 from app.models.referral_commission import ReferralCommission
+from app.models.payout_batch import PayoutBatch  # ✅ NEW
 
 # NOTE:
 # As you add new models, they MUST be imported here.
