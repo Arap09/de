@@ -2,10 +2,11 @@ from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
-from pydantic import BaseModel, EmailStr, Field
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, EmailStr, Field, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.db.session import get_db
 from app.services.auth import get_current_user
 from app.models.user import User
@@ -14,7 +15,6 @@ from app.api.deps import get_current_membership, require_consent
 from app.core.rbac import require_roles
 from app.core.roles import TenantRole
 from app.models.tenant import Tenant
-from app.models.tenant_invitation import TenantInvitation
 
 from app.services.invitations import (
     create_invitation,
@@ -28,11 +28,11 @@ router = APIRouter(prefix="/invitations", tags=["Invitations"])
 
 
 # ---------------------------
-# Pydantic Schemas (local)
+# Pydantic Schemas (stable)
 # ---------------------------
 class InvitationCreate(BaseModel):
     email: EmailStr
-    role: str = Field(..., description="ADMIN|MANAGER|AGENT|SALES")
+    role: TenantRole = Field(..., description="Tenant role to assign on acceptance")
 
 
 class InvitationAccept(BaseModel):
@@ -40,18 +40,36 @@ class InvitationAccept(BaseModel):
 
 
 class InvitationOut(BaseModel):
+    """
+    Canonical invitation payload. Used consistently by create/list/revoke.
+    """
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     tenant_id: UUID
     inviter_user_id: Optional[UUID]
     email: str
     role: str
+    token: str
     expires_at: datetime
     accepted_at: Optional[datetime]
     revoked_at: Optional[datetime]
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+
+class InvitationSendResponse(BaseModel):
+    invitation: InvitationOut
+    email_sent: bool
+    accept_url: str
+
+
+class InvitationsListResponse(BaseModel):
+    invitations: List[InvitationOut]
+
+
+class InvitationRevokeResponse(BaseModel):
+    invitation: InvitationOut
+    revoked: bool
 
 
 class AcceptResult(BaseModel):
@@ -65,7 +83,7 @@ class AcceptResult(BaseModel):
 # --------------------------------------------------
 @router.post(
     "",
-    response_model=InvitationOut,
+    response_model=InvitationSendResponse,
     status_code=status.HTTP_201_CREATED,
 )
 async def send_invitation(
@@ -85,26 +103,31 @@ async def send_invitation(
     - Consent accepted
     - Role: OWNER or ADMIN
     """
-    # tenant_id comes from membership (tenant-scoped)
     tenant = await db.get(Tenant, membership.tenant_id)
     if not tenant:
-        # Should never happen if tenant membership is valid, but keep safety
-        raise Exception("Tenant not found for membership")
+        raise HTTPException(status_code=404, detail="Tenant not found for membership")
 
     invitation = await create_invitation(
         db,
         tenant=tenant,
         inviter=current_user,
         email=str(payload.email),
-        role=payload.role,
+        role=payload.role.value,  # store canonical string (e.g. "admin", "agent")
     )
-    return invitation
+
+    accept_url = f"{settings.APP_BASE_URL.rstrip('/')}/accept-invitation?token={invitation.token}"
+
+    return {
+        "invitation": invitation,
+        "email_sent": True,
+        "accept_url": accept_url,
+    }
 
 
 # --------------------------------------------------
 # List invitations (OWNER/ADMIN only, consent required)
 # --------------------------------------------------
-@router.get("", response_model=List[InvitationOut])
+@router.get("", response_model=InvitationsListResponse)
 async def list_all_invitations(
     status_filter: Optional[str] = None,
     limit: int = 50,
@@ -124,13 +147,13 @@ async def list_all_invitations(
         status_filter=status_filter,
         limit=limit,
     )
-    return invites
+    return {"invitations": invites}
 
 
 # --------------------------------------------------
 # Revoke invitation (OWNER/ADMIN only, consent required)
 # --------------------------------------------------
-@router.post("/{invitation_id}/revoke", response_model=InvitationOut)
+@router.post("/{invitation_id}/revoke", response_model=InvitationRevokeResponse)
 async def revoke(
     invitation_id: UUID,
     db: AsyncSession = Depends(get_db),
@@ -146,7 +169,10 @@ async def revoke(
         tenant_id=membership.tenant_id,
         invitation_id=invitation_id,
     )
-    return invitation
+    return {
+        "invitation": invitation,
+        "revoked": invitation.revoked_at is not None,
+    }
 
 
 # --------------------------------------------------

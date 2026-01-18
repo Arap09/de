@@ -35,6 +35,13 @@ class Settings(BaseSettings):
     MEDIA_DOMAIN: str
 
     # --------------------------------------------------
+    # Email (stubbed by default)
+    # --------------------------------------------------
+    EMAIL_MODE: str = "stub"  # stub | smtp | sendgrid | ses ...
+    EMAIL_FROM: str = "no-reply@postika.co.ke"
+    APP_BASE_URL: str = "http://localhost:5173"  # used for invitation links (frontend)
+
+    # --------------------------------------------------
     # Business Rules
     # --------------------------------------------------
     TRIAL_PERIOD_DAYS: int = 7

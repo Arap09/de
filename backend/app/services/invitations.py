@@ -8,10 +8,13 @@ from fastapi import HTTPException, status
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.models.tenant_invitation import TenantInvitation
 from app.models.tenant_membership import TenantMembership
 from app.models.user import User
 from app.models.tenant import Tenant
+from app.services.email import email_service
+from app.services.invitation_emails import build_invitation_email
 
 
 ALLOWED_INVITE_ROLES = {"ADMIN", "MANAGER", "AGENT", "SALES"}
@@ -98,7 +101,7 @@ async def create_invitation(
 
     NOTE:
     - Tier-based agent limits can be enforced here later (Phase 3/4).
-    - Email send is intentionally stubbed (you can integrate your mailer).
+    - Email send is stubbed; provider integration can be added later.
     """
     role = role.strip().upper()
     if role not in ALLOWED_INVITE_ROLES:
@@ -132,8 +135,19 @@ async def create_invitation(
     await db.commit()
     await db.refresh(invitation)
 
-    # TODO: integrate email sending (e.g., app/services/mailer.py)
-    # await send_invitation_email(invitation, tenant_name=tenant.name, inviter_email=inviter.email)
+    # --------------------------------------------------
+    # Email (stubbed)
+    # --------------------------------------------------
+    inviter_display_name = inviter.email  # until profile names exist
+    accept_url = f"{settings.APP_BASE_URL.rstrip('/')}/accept-invitation?token={invitation.token}"
+
+    msg = build_invitation_email(
+        to_email=invitation.email,
+        inviter_name=inviter_display_name,
+        tenant_name=tenant.name,
+        accept_url=accept_url,
+    )
+    await email_service.send(msg)
 
     return invitation
 
