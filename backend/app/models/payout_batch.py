@@ -14,7 +14,11 @@ from app.db.base import Base
 class PayoutBatch(Base):
     __tablename__ = "payout_batches"
 
-    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
 
     salesperson_user_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
@@ -28,9 +32,12 @@ class PayoutBatch(Base):
 
     total_amount_kes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    # Optional relationships (safe even if you don’t use them yet)
     salesperson = relationship("User", lazy="joined")

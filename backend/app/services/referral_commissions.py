@@ -1,3 +1,4 @@
+# app/services/referral_commissions.py
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -42,6 +43,24 @@ def assert_commission_transition(from_status: str, to_status: str) -> None:
         raise ValueError(f"Invalid commission transition: {f} -> {t}")
 
 
+# -----------------------------
+# Batch status transitions (single source of truth)
+# -----------------------------
+BATCH_TRANSITIONS: dict[str, set[str]] = {
+    "draft": {"submitted"},
+    "submitted": {"paid"},
+    "paid": set(),
+}
+
+
+def assert_batch_transition(from_status: str, to_status: str) -> None:
+    f = _normalize_status(from_status)
+    t = _normalize_status(to_status)
+    allowed = BATCH_TRANSITIONS.get(f, set())
+    if t not in allowed:
+        raise ValueError(f"Invalid batch transition: {f} -> {t}")
+
+
 async def require_active_salesperson_profile(db: AsyncSession, *, user_id: UUID) -> SalespersonProfile:
     stmt = select(SalespersonProfile).where(SalespersonProfile.user_id == user_id)
     res = await db.execute(stmt)
@@ -49,6 +68,44 @@ async def require_active_salesperson_profile(db: AsyncSession, *, user_id: UUID)
     if not profile or not profile.is_active:
         raise LookupError("Salesperson access required")
     return profile
+
+
+async def _get_batch_for_update(db: AsyncSession, *, batch_id: UUID) -> PayoutBatch:
+    """
+    Lock the batch row to prevent concurrent submit/paid transitions.
+    """
+    stmt = select(PayoutBatch).where(PayoutBatch.id == batch_id).with_for_update()
+    res = await db.execute(stmt)
+    batch = res.scalar_one_or_none()
+    if not batch:
+        raise LookupError("Batch not found")
+    return batch
+
+
+async def _get_batch_commissions_for_update(db: AsyncSession, *, batch_id: UUID) -> list[ReferralCommission]:
+    """
+    Lock all commissions in the batch. This prevents races during payment.
+    """
+    stmt = (
+        select(ReferralCommission)
+        .where(ReferralCommission.payout_batch_id == batch_id)
+        .with_for_update()
+    )
+    res = await db.execute(stmt)
+    return list(res.scalars().all())
+
+
+def _validate_commissions_match_batch(batch: PayoutBatch, commissions: list[ReferralCommission]) -> None:
+    """
+    Service-layer integrity guard: all commissions in batch must match the
+    batch salesperson and currency.
+    """
+    b_cur = (batch.currency or "").strip().upper()
+    for c in commissions:
+        if c.salesperson_user_id != batch.salesperson_user_id:
+            raise ValueError("Batch contains commission for a different salesperson")
+        if (c.currency or "").strip().upper() != b_cur:
+            raise ValueError("Batch contains commission with a different currency")
 
 
 # -----------------------------
@@ -176,7 +233,8 @@ async def create_payout_batch_for_salesperson(
 
     cur = (currency or "KES").strip().upper()
 
-    # Lock eligible commissions to prevent double-batching under concurrency
+    # Lock eligible commissions to prevent double-batching under concurrency.
+    # SKIP LOCKED avoids blocking and supports safe parallel requests.
     stmt = (
         select(ReferralCommission)
         .where(
@@ -187,7 +245,7 @@ async def create_payout_batch_for_salesperson(
         )
         .order_by(ReferralCommission.created_at.asc())
         .limit(max_items)
-        .with_for_update()
+        .with_for_update(skip_locked=True)
     )
     res = await db.execute(stmt)
     commissions: Sequence[ReferralCommission] = list(res.scalars().all())
@@ -202,12 +260,11 @@ async def create_payout_batch_for_salesperson(
         currency=cur,
         status="draft",
         total_amount_kes=int(total),
-        created_at=_utcnow(),
+        # Do NOT set created_at; DB default applies (model uses server_default=now())
     )
     db.add(batch)
     await db.flush()  # assign batch.id without committing yet
 
-    # Update commissions
     for c in commissions:
         assert_commission_transition(c.status, "batched")
         c.status = "batched"
@@ -224,15 +281,29 @@ async def submit_payout_batch(
     batch_id: UUID,
     salesperson_user_id: UUID,
 ) -> PayoutBatch:
-    batch = await db.get(PayoutBatch, batch_id)
-    if not batch:
-        raise LookupError("Batch not found")
+    # Lock batch row to prevent concurrent submit/pay
+    batch = await _get_batch_for_update(db, batch_id=batch_id)
 
     if batch.salesperson_user_id != salesperson_user_id:
         raise PermissionError("Not allowed")
 
-    if _normalize_status(batch.status) != "draft":
-        raise ValueError("Only draft batches can be submitted")
+    assert_batch_transition(batch.status, "submitted")
+
+    # Lock commissions and validate
+    commissions = await _get_batch_commissions_for_update(db, batch_id=batch.id)
+    if not commissions:
+        raise ValueError("Cannot submit an empty batch")
+
+    _validate_commissions_match_batch(batch, commissions)
+
+    # Optional hard guard: all commissions must be batched before submit
+    for c in commissions:
+        if _normalize_status(c.status) != "batched":
+            raise ValueError("All commissions in batch must be 'batched' before submitting")
+
+    # Recompute total (prevents drift)
+    total = sum(int(c.amount_kes) for c in commissions)
+    batch.total_amount_kes = int(total)
 
     batch.status = "submitted"
     batch.submitted_at = _utcnow()
@@ -247,21 +318,16 @@ async def mark_payout_batch_paid(
     *,
     batch_id: UUID,
 ) -> PayoutBatch:
-    batch = await db.get(PayoutBatch, batch_id)
-    if not batch:
-        raise LookupError("Batch not found")
+    # Lock batch row to prevent double-pay
+    batch = await _get_batch_for_update(db, batch_id=batch_id)
 
-    if _normalize_status(batch.status) != "submitted":
-        raise ValueError("Only submitted batches can be marked paid")
+    assert_batch_transition(batch.status, "paid")
 
-    # Lock all commissions in the batch
-    stmt = (
-        select(ReferralCommission)
-        .where(ReferralCommission.payout_batch_id == batch.id)
-        .with_for_update()
-    )
-    res = await db.execute(stmt)
-    commissions = list(res.scalars().all())
+    commissions = await _get_batch_commissions_for_update(db, batch_id=batch.id)
+    if not commissions:
+        raise ValueError("Batch has no commissions")
+
+    _validate_commissions_match_batch(batch, commissions)
 
     for c in commissions:
         assert_commission_transition(c.status, "paid")

@@ -60,10 +60,12 @@ class SalespersonProfileOut(BaseModel):
 
 
 class RejectIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     reason: str = Field(min_length=2, max_length=500)
 
 
 class ApproveIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     notes: Optional[str] = Field(default=None, max_length=500)
 
 
@@ -81,6 +83,7 @@ class PayoutBatchOut(BaseModel):
 
 
 class PayoutBatchCreateIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     currency: str = Field(default="KES", min_length=3, max_length=8)
     max_items: int = Field(default=500, ge=1, le=2000)
 
@@ -140,6 +143,7 @@ async def admin_reject_commission(
 
 # --------------------------------------------------
 # Salesperson self-view: only my commissions
+# (Gated by active salesperson profile; no PlatformRole.SALESPERSON dependency)
 # --------------------------------------------------
 @router.get("/me/commissions", response_model=List[CommissionOut])
 async def list_my_commissions(
@@ -151,7 +155,7 @@ async def list_my_commissions(
     try:
         await require_active_salesperson_profile(db, user_id=current_user.id)
     except LookupError:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Salesperson access required")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Salesperson access required")
 
     stmt = (
         select(ReferralCommission)
@@ -181,7 +185,7 @@ async def get_my_sales_profile(
 
     if not profile or not profile.is_active:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=status.HTTP_403_FORBIDDEN,
             detail="Salesperson access required",
         )
 
@@ -206,7 +210,7 @@ async def create_my_payout_batch(
         )
         return batch
     except LookupError:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Salesperson access required")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Salesperson access required")
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
@@ -221,7 +225,7 @@ async def list_my_payout_batches(
     try:
         await require_active_salesperson_profile(db, user_id=current_user.id)
     except LookupError:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Salesperson access required")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Salesperson access required")
 
     stmt = (
         select(PayoutBatch)
@@ -245,7 +249,7 @@ async def get_my_payout_batch(
     try:
         await require_active_salesperson_profile(db, user_id=current_user.id)
     except LookupError:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Salesperson access required")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Salesperson access required")
 
     batch = await db.get(PayoutBatch, batch_id)
     if not batch or batch.salesperson_user_id != current_user.id:

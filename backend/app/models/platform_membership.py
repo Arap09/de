@@ -1,3 +1,4 @@
+# app/models/platform_membership.py
 import uuid
 from datetime import datetime
 from typing import Optional
@@ -23,7 +24,8 @@ class PlatformMembership(Base):
         index=True,
     )
 
-    role: Mapped[str] = mapped_column(String(50), nullable=False)  # super_admin | platform_admin
+    # Expected values (string): super_admin | platform_admin | sales
+    role: Mapped[str] = mapped_column(String(50), nullable=False)
 
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
@@ -38,3 +40,6 @@ class PlatformMembership(Base):
         nullable=False,
         server_default=func.now(),
     )
+
+    def __repr__(self) -> str:
+        return f"<PlatformMembership user_id={self.user_id} role={self.role} active={self.is_active}>"
