@@ -1,9 +1,11 @@
-from datetime import datetime
-from typing import Optional
-from uuid import UUID  # FIX: UUID import
+from __future__ import annotations
 
-from pydantic import BaseModel, EmailStr, Field
+from datetime import datetime
 from enum import Enum
+from typing import Optional
+from uuid import UUID
+
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 class TierEnum(str, Enum):
@@ -13,17 +15,34 @@ class TierEnum(str, Enum):
 
 
 # --------------------------------------------------
-# Email-only signup (magic code)
+# NEW: Email-only request for staff/sales/platform
 # --------------------------------------------------
-class MagicCodeRequest(BaseModel):
+class MagicCodeRequestStaff(BaseModel):
     email: EmailStr
-    tier: TierEnum = TierEnum.sungura
+
+
+# --------------------------------------------------
+# NEW: Tenant OWNER entrypoint (tier + ToS required)
+# Notifications optional (global), referral optional
+# --------------------------------------------------
+class MagicCodeRequestTenant(BaseModel):
+    email: EmailStr
+    tier: TierEnum = Field(..., description="Tenant tier chosen on homepage")
     referral_code: Optional[str] = None
-    accepts_notifications: bool = True
-    accepted_terms: bool = Field(
-        ...,
-        description="Must be true to proceed"
-    )
+    accepts_notifications: bool = False
+    accepted_terms: bool = Field(..., description="Must be true to proceed")
+
+    @field_validator("accepted_terms")
+    @classmethod
+    def validate_accepted_terms(cls, v: bool) -> bool:
+        if v is not True:
+            raise ValueError("accepted_terms must be true")
+        return v
+
+
+# Backward compat
+class MagicCodeRequest(MagicCodeRequestTenant):
+    pass
 
 
 class MagicCodeVerify(BaseModel):
@@ -31,20 +50,21 @@ class MagicCodeVerify(BaseModel):
     code: str = Field(..., min_length=6, max_length=6)
 
 
-# --------------------------------------------------
-# INTERNAL: user creation during magic-code signup
-# --------------------------------------------------
 class UserCreate(BaseModel):
     email: EmailStr
-    tier: TierEnum = TierEnum.sungura
+    tier: TierEnum
     referral_code: Optional[str] = None
-    accepts_notifications: bool = True
+    accepts_notifications: bool = False
     accepted_terms: bool
 
+    @field_validator("accepted_terms")
+    @classmethod
+    def validate_accepted_terms(cls, v: bool) -> bool:
+        if v is not True:
+            raise ValueError("accepted_terms must be true")
+        return v
 
-# --------------------------------------------------
-# Profile completion (post-login)
-# --------------------------------------------------
+
 class UserProfileUpdate(BaseModel):
     first_name: str = Field(..., max_length=50)
     last_name: str = Field(..., max_length=50)
@@ -52,13 +72,15 @@ class UserProfileUpdate(BaseModel):
     phone_number: str = Field(..., max_length=20)
 
 
-# --------------------------------------------------
-# API response
-# --------------------------------------------------
+class NotificationsPreferenceUpdate(BaseModel):
+    accepts_notifications: bool = Field(..., description="Global notifications preference true/false")
+
+
 class UserRead(BaseModel):
-    id: UUID  # FIX: UUID, not int
+    id: UUID
     email: EmailStr
     tier: TierEnum
+    accepts_notifications: bool
     is_email_verified: bool
     trial_expires_at: Optional[datetime]
     created_at: datetime

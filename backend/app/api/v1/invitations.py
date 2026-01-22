@@ -1,211 +1,204 @@
-from datetime import datetime
-from typing import List, Optional
-from uuid import UUID
+# app/api/v1/auth.py
+from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, EmailStr, Field, ConfigDict
+from datetime import datetime
+from fastapi import APIRouter, Depends, status, HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
 from app.db.session import get_db
-from app.services.auth import get_current_user
+from app.schemas.user import (
+    MagicCodeRequestStaff,
+    MagicCodeRequestTenant,
+    MagicCodeVerify,
+    NotificationsPreferenceUpdate,
+)
+from app.services.auth import (
+    request_magic_code,
+    verify_magic_code,
+    get_current_user,
+)
 from app.models.user import User
 
+# TENANT / CONSENT
 from app.api.deps import get_current_membership, require_consent
-from app.core.rbac import require_roles
-from app.core.roles import TenantRole
-from app.models.tenant import Tenant
-
-from app.services.invitations import (
-    create_invitation,
-    list_invitations,
-    revoke_invitation,
-    accept_invitation,
-)
+from app.models.tenant_membership import TenantMembership
+from app.models.user_consent import UserConsent
 
 
-router = APIRouter(prefix="/invitations", tags=["Invitations"])
-
-
-# ---------------------------
-# Pydantic Schemas (stable)
-# ---------------------------
-class InvitationCreate(BaseModel):
-    email: EmailStr
-    role: TenantRole = Field(..., description="Tenant role to assign on acceptance")
-
-
-class InvitationAccept(BaseModel):
-    token: str = Field(..., min_length=20)
-
-
-class InvitationOut(BaseModel):
-    """
-    Canonical invitation payload. Used consistently by create/list/revoke.
-    """
-    model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
-    tenant_id: UUID
-    inviter_user_id: Optional[UUID]
-    email: str
-    role: str
-    token: str
-    expires_at: datetime
-    accepted_at: Optional[datetime]
-    revoked_at: Optional[datetime]
-    created_at: datetime
-
-
-class InvitationSendResponse(BaseModel):
-    invitation: InvitationOut
-    email_sent: bool
-    accept_url: str
-
-
-class InvitationsListResponse(BaseModel):
-    invitations: List[InvitationOut]
-
-
-class InvitationRevokeResponse(BaseModel):
-    invitation: InvitationOut
-    revoked: bool
-
-
-class AcceptResult(BaseModel):
-    tenant_id: UUID
-    role: str
-    membership_created: bool = True
+router = APIRouter(prefix="/auth", tags=["Auth"])
 
 
 # --------------------------------------------------
-# Create invitation (OWNER/ADMIN only, consent required)
+# Request magic code — STAFF entrypoint (email only)
 # --------------------------------------------------
-@router.post(
-    "",
-    response_model=InvitationSendResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-async def send_invitation(
-    payload: InvitationCreate,
+@router.post("/request-code/staff", status_code=status.HTTP_204_NO_CONTENT)
+async def request_code_staff(
+    payload: MagicCodeRequestStaff,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    membership=Depends(get_current_membership),
-    _: bool = Depends(require_consent),
-    __=Depends(require_roles([TenantRole.OWNER, TenantRole.ADMIN])),
 ):
     """
-    Create and send an invitation to join the current tenant.
+    For:
+    - Tenant staff
+    - Platform staff
+    - Salespeople
+
+    Email-only. No ToS here (ToS happens post-auth via consent).
+    """
+    await request_magic_code(db, payload)
+
+
+# --------------------------------------------------
+# Request magic code — TENANT OWNER entrypoint (enforced)
+# --------------------------------------------------
+@router.post("/request-code/tenant", status_code=status.HTTP_204_NO_CONTENT)
+async def request_code_tenant(
+    payload: MagicCodeRequestTenant,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Tenant OWNER signup/login entrypoint.
 
     Requires:
-    - Bearer token
-    - X-Tenant-Id
-    - Consent accepted
-    - Role: OWNER or ADMIN
+    - email
+    - tier (chosen on homepage)
+    - accepted_terms == True
+    - accepts_notifications optional (default False)
+    - referral_code optional
     """
-    tenant = await db.get(Tenant, membership.tenant_id)
-    if not tenant:
-        raise HTTPException(status_code=404, detail="Tenant not found for membership")
+    if payload.accepted_terms is not True:
+        raise HTTPException(status_code=400, detail="You must accept Terms of Service to continue.")
 
-    invitation = await create_invitation(
+    # tier is required by schema; keep defensive check anyway
+    if not payload.tier:
+        raise HTTPException(status_code=400, detail="Tier is required.")
+
+    await request_magic_code(db, payload)
+
+
+# --------------------------------------------------
+# Verify magic code (shared)
+# --------------------------------------------------
+@router.post("/verify-code")
+async def verify_code(
+    payload: MagicCodeVerify,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Shared verification for all identities.
+    """
+    result = await verify_magic_code(
         db,
-        tenant=tenant,
-        inviter=current_user,
-        email=str(payload.email),
-        role=payload.role.value,  # store canonical string (e.g. "admin", "agent")
+        email=payload.email,
+        code=payload.code,
     )
 
-    accept_url = f"{settings.APP_BASE_URL.rstrip('/')}/accept-invitation?token={invitation.token}"
-
     return {
-        "invitation": invitation,
-        "email_sent": True,
-        "accept_url": accept_url,
+        "access_token": result["access_token"],
+        "token_type": "bearer",
+        "tenant_id": result.get("tenant_id"),
     }
 
 
 # --------------------------------------------------
-# List invitations (OWNER/ADMIN only, consent required)
+# Current authenticated user (tenant-aware)
 # --------------------------------------------------
-@router.get("", response_model=InvitationsListResponse)
-async def list_all_invitations(
-    status_filter: Optional[str] = None,
-    limit: int = 50,
-    db: AsyncSession = Depends(get_db),
-    membership=Depends(get_current_membership),
+@router.get("/me")
+async def me(
+    current_user: User = Depends(get_current_user),
+    membership: TenantMembership = Depends(get_current_membership),
     _: bool = Depends(require_consent),
-    __=Depends(require_roles([TenantRole.OWNER, TenantRole.ADMIN])),
 ):
-    """
-    List invitations for the current tenant.
-
-    status_filter: pending|accepted|revoked|expired|all
-    """
-    invites = await list_invitations(
-        db,
-        tenant_id=membership.tenant_id,
-        status_filter=status_filter,
-        limit=limit,
-    )
-    return {"invitations": invites}
-
-
-# --------------------------------------------------
-# Revoke invitation (OWNER/ADMIN only, consent required)
-# --------------------------------------------------
-@router.post("/{invitation_id}/revoke", response_model=InvitationRevokeResponse)
-async def revoke(
-    invitation_id: UUID,
-    db: AsyncSession = Depends(get_db),
-    membership=Depends(get_current_membership),
-    _: bool = Depends(require_consent),
-    __=Depends(require_roles([TenantRole.OWNER, TenantRole.ADMIN])),
-):
-    """
-    Revoke a pending invitation (idempotent).
-    """
-    invitation = await revoke_invitation(
-        db,
-        tenant_id=membership.tenant_id,
-        invitation_id=invitation_id,
-    )
     return {
-        "invitation": invitation,
-        "revoked": invitation.revoked_at is not None,
+        "user": {
+            "id": current_user.id,
+            "email": current_user.email,
+            "accepts_notifications": getattr(current_user, "accepts_notifications", False),
+        },
+        "tenant": {"id": membership.tenant_id},
+        "role": membership.role,
     }
 
 
 # --------------------------------------------------
-# Accept invitation (AUTH ONLY; EXEMPT FROM CONSENT)
+# Accept role-specific consent (POST-AUTH)
 # --------------------------------------------------
-@router.post("/accept", response_model=AcceptResult)
-async def accept(
-    payload: InvitationAccept,
+@router.post("/consent/accept", status_code=status.HTTP_204_NO_CONTENT)
+async def accept_consent(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    membership: TenantMembership = Depends(get_current_membership),
+):
+    """
+    Accept role-specific ToS (post-auth).
+    Notifications is separate and global.
+    """
+    stmt = (
+        select(UserConsent)
+        .where(UserConsent.user_id == current_user.id)
+        .where(UserConsent.tenant_id == membership.tenant_id)
+        .where(UserConsent.role == membership.role)
+        .where(UserConsent.revoked_at.is_(None))
+    )
+
+    result = await db.execute(stmt)
+    existing = result.scalar_one_or_none()
+    if existing:
+        return
+
+    consent = UserConsent(
+        user_id=current_user.id,
+        tenant_id=membership.tenant_id,
+        role=membership.role,
+        accepted_at=datetime.utcnow(),
+    )
+
+    db.add(consent)
+    await db.commit()
+
+
+# --------------------------------------------------
+# Check consent status (frontend bootstrap)
+# --------------------------------------------------
+@router.get("/consent/status")
+async def consent_status(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    membership: TenantMembership = Depends(get_current_membership),
+):
+    stmt = (
+        select(UserConsent)
+        .where(UserConsent.user_id == current_user.id)
+        .where(UserConsent.tenant_id == membership.tenant_id)
+        .where(UserConsent.role == membership.role)
+        .where(UserConsent.revoked_at.is_(None))
+    )
+
+    result = await db.execute(stmt)
+    consent = result.scalar_one_or_none()
+
+    return {
+        "role": membership.role,
+        "consent_accepted": bool(consent),
+    }
+
+
+# --------------------------------------------------
+# Global notifications preference (POST-AUTH, any user)
+# --------------------------------------------------
+@router.post("/notifications", status_code=status.HTTP_204_NO_CONTENT)
+async def set_notifications_preference(
+    payload: NotificationsPreferenceUpdate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
-    Accept an invitation using its token.
-
-    IMPORTANT:
-    - This endpoint is intentionally NOT protected by:
-      - get_current_membership (user isn't a member yet)
-      - require_consent (consent happens after membership)
-      - require_roles
-
-    After acceptance, the user should:
-    - send X-Tenant-Id header
-    - call /auth/consent/status
-    - if required, call /auth/consent/accept
+    Global opt-in/out. Applies to:
+    - tenant owners
+    - tenant staff
+    - platform staff
+    - salespeople
     """
-    membership = await accept_invitation(
-        db,
-        token=payload.token,
-        current_user=current_user,
-    )
-
-    return {
-        "tenant_id": membership.tenant_id,
-        "role": membership.role,
-        "membership_created": True,
-    }
+    current_user.accepts_notifications = payload.accepts_notifications
+    db.add(current_user)
+    await db.commit()

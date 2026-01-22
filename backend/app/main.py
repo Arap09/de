@@ -1,3 +1,5 @@
+# app/main.py
+
 import os
 
 # Async DB URL (used by FastAPI / SQLAlchemy async)
@@ -14,8 +16,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.api.v1.auth import router as auth_router
-from app.api.v1.platform_invitations import router as platform_invitations_router
 from app.api.v1.platform_sales import router as platform_sales_router
+
+# ✅ Unified invitations router (tenant + platform + salesperson)
+from app.api.v1.invitations import router as invitations_router
 
 # --------------------------------------------------
 # 🔑 Force model registration at application startup
@@ -44,8 +48,16 @@ def create_application() -> FastAPI:
     # API Routers
     # --------------------------------------------------
     app.include_router(auth_router, prefix="/api/v1")
-    app.include_router(platform_invitations_router, prefix="/api/v1")
+
+    # ✅ Keep platform sales (commissions/payouts) as-is
     app.include_router(platform_sales_router, prefix="/api/v1")
+
+    # ✅ Invitations are now unified; this powers tenant staff + platform staff + salespeople invites
+    app.include_router(invitations_router, prefix="/api/v1")
+
+    # ❌ DO NOT include platform_invitations_router anymore.
+    # This removes /api/v1/platform/invitations* endpoints from Swagger,
+    # while unified invitations still call the platform invitation service internally.
 
     # --------------------------------------------------
     # Health check
